@@ -4,44 +4,44 @@
 #  define MAYBE_UNUSED
 #endif
 
-#define AFL_MAIN                        // Нужно для некоторых определений из AFL++ headers
-#include "afl-fuzz.h"                   // Основной заголовочный файл AFL++
+#define AFL_MAIN                        // Required for some definitions from AFL++ headers
+#include "afl-fuzz.h"                   // Main AFL++ header file
 
-// Попытка включить config.h, который обычно определяет RAND_CACHE_SIZE
-// Убедитесь, что config.h находится в пути, указанном через -I (например, /afl/include/config.h)
-#if __has_include("config.h") || defined(HAVE_CONFIG_H) // Более безопасная проверка для include
+// Attempt to include config.h, which usually defines RAND_CACHE_SIZE
+// Ensure config.h is in the path specified via -I (e.g., /afl/include/config.h)
+#if __has_include("config.h") || defined(HAVE_CONFIG_H) // Safer check for include
 #include "config.h"
 #endif
 
 
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdlib.h> // For malloc, free, calloc, rand
 #include <string.h>
 #include <stdint.h>
-#include <math.h>                       // Для sqrt
-#include <time.h>                       // Для возможного fallback ГПСЧ
+#include <math.h>                       // For sqrt
+#include <time.h>                       // For a possible PRNG fallback, or srand
 
-// Заголовочный файл для OpenMP, если используется
+// Header file for OpenMP, if used
 #if defined(_OPENMP)
 #include <omp.h>
 #endif
 
-// Максимальные размеры сетки для предотвращения чрезмерного использования памяти
+// Maximum grid dimensions to prevent excessive memory usage
 #define MAX_GRID_DIM 256
 
-// Если RAND_CACHE_SIZE все еще не определен после попытки включить config.h
+// If RAND_CACHE_SIZE is still not defined after attempting to include config.h
 #ifndef RAND_CACHE_SIZE
 #define RAND_CACHE_SIZE 256
-#warning "RAND_CACHE_SIZE was not defined by AFL++ headers (config.h potentially missing or doesn't define it), using default 256. Check your AFL++ include paths and headers."
+// #warning "RAND_CACHE_SIZE was not defined by AFL++ headers (config.h potentially missing or doesn't define it), using default 256. Check your AFL++ include paths and headers."
 #endif
 
 
-// Структура для хранения состояния нашего мутатора
+// Structure to store the state of our mutator
 typedef struct {
-    afl_state_t *afl;         // Указатель на состояние AFL++
-    uint8_t *grid_cur;        // Текущее состояние сетки КА
-    uint8_t *grid_next;       // Следующее состояние сетки КА
-    size_t grid_capacity;     // Текущая выделенная емкость для сеток (в ячейках)
+    afl_state_t *afl;         // Pointer to the AFL++ state
+    uint8_t *grid_cur;        // Current state of the CA grid
+    uint8_t *grid_next;       // Next state of the CA grid
+    size_t grid_capacity;     // Current allocated capacity for the grids (in cells)
 } my_mutator_t;
 
 MAYBE_UNUSED void *afl_custom_init(afl_state_t *afl, unsigned int seed) {
@@ -51,7 +51,10 @@ MAYBE_UNUSED void *afl_custom_init(afl_state_t *afl, unsigned int seed) {
         return NULL;
     }
     data->afl = afl;
-    (void)seed; // Подавляем предупреждение о неиспользуемом параметре, если seed не используется
+    (void)seed; // Suppress unused parameter warning if seed is not used
+    // If using rand() in fuzz, consider srand(seed) here if afl is NULL
+    // or for standalone testing where seed might be more controlled.
+    // However, the test harness calls srand separately.
     return data;
 }
 
@@ -83,7 +86,7 @@ MAYBE_UNUSED size_t afl_custom_fuzz(void *data, uint8_t *buf, size_t buf_size,
         if (width <= 0) width = 1;
         if (width > MAX_GRID_DIM) width = MAX_GRID_DIM;
 
-        height = (buf_size + width - 1) / width;
+        height = (buf_size + width - 1) / width; 
         if (height <= 0) height = 1;
         if (height > MAX_GRID_DIM) height = MAX_GRID_DIM;
     }
@@ -108,40 +111,54 @@ MAYBE_UNUSED size_t afl_custom_fuzz(void *data, uint8_t *buf, size_t buf_size,
             mutator_data->grid_next = NULL;
             mutator_data->grid_capacity = 0;
             *out_buf_ptr = NULL;
-            return 0;
+            return 0; 
         }
         mutator_data->grid_capacity = total_cells;
     }
 
     size_t init_size = (buf_size < total_cells) ? buf_size : total_cells;
-    // *** ИСПРАВЛЕНА ОПЕЧАТКА ЗДЕСЬ ***
-    memcpy(mutator_data->grid_cur, buf, init_size); // Было grid__cur 
-    // **********************************
-    if (total_cells > init_size) {
+    memcpy(mutator_data->grid_cur, buf, init_size); 
+    if (total_cells > init_size) { 
         memset(mutator_data->grid_cur + init_size, 0, total_cells - init_size);
     }
 
-    int num_iterations_T = 1; 
-    if (mutator_data->afl) { 
+    // Determine number of CA iterations
+    int num_iterations_T = 1;
+
+    // =============== МОДИФИКАЦИЯ ДЛЯ ТЕСТИРОВАНИЯ GDB ===============
+    // Следующий блок, использующий mutator_data->afl->..., закомментирован.
+    // Вместо него используется rand() или фиксированное значение.
+    /*
+    if (mutator_data->afl && mutator_data->afl->rand_seed) { 
         if (mutator_data->afl->rand_cnt >= RAND_CACHE_SIZE) { 
              mutator_data->afl->rand_cnt = 0; 
         }
         uint32_t random_val = mutator_data->afl->rand_seed[mutator_data->afl->rand_cnt++];
-        num_iterations_T = 1 + (random_val % 8);
+        num_iterations_T = 1 + (random_val % 8); 
     } else {
-        // Резервный вариант... (маловероятен)
+        // Fallback if AFL's RNG is not available
+        // Если используется тестовая обвязка, она должна была вызвать srand().
+        num_iterations_T = 1 + (rand() % 8); 
     }
+    */
+    // Используем rand() для определения количества итераций в целях теста.
+    // Тестовая обвязка (standalone-mutator.c) вызывает srand(), так что rand() здесь будет выдавать
+    // псевдослучайные значения при каждом запуске обвязки.
+    num_iterations_T = 1 + (rand() % 8); 
+    // Для максимальной простоты теста можно даже использовать фиксированное значение:
+    // num_iterations_T = 1;
+    // ================= КОНЕЦ МОДИФИКАЦИИ =======================
 
     for (int iter = 0; iter < num_iterations_T; ++iter) {
         #if defined(_OPENMP)
-        #pragma omp parallel for collapse(2)
+        #pragma omp parallel for collapse(2) 
         #endif
         for (int r = 0; r < height; ++r) {
             for (int c = 0; c < width; ++c) {
                 uint8_t xor_sum_neighbors = 0;
                 for (int dr = -1; dr <= 1; ++dr) {
                     for (int dc = -1; dc <= 1; ++dc) {
-                        if (dr == 0 && dc == 0) continue;
+                        if (dr == 0 && dc == 0) continue; 
                         int nr = (r + dr + height) % height;
                         int nc = (c + dc + width) % width;
                         xor_sum_neighbors ^= mutator_data->grid_cur[nr * width + nc];
@@ -156,25 +173,23 @@ MAYBE_UNUSED size_t afl_custom_fuzz(void *data, uint8_t *buf, size_t buf_size,
     }
 
     size_t out_size = total_cells;
-    if (max_size > 0 && out_size > max_size) {
+    if (max_size > 0 && out_size > max_size) { 
         out_size = max_size;
     }
 
-    uint8_t *new_out_buf = (uint8_t *)realloc(*out_buf_ptr, out_size);
+    uint8_t *new_out_buf = (uint8_t *)realloc(*out_buf_ptr, out_size); 
     if (!new_out_buf) {
-        if (out_size > 0) { // Ошибка только если мы действительно хотели выделить память
+        if (out_size > 0) { 
              return 0;
         }
-        // Если out_size == 0, realloc мог вернуть NULL, и это нормально (или другой валидный указатель).
-        // *out_buf_ptr будет установлен в new_out_buf (т.е. NULL или другой указатель).
     }
     *out_buf_ptr = new_out_buf;
 
-    if (out_size > 0 && *out_buf_ptr) { // Убедимся, что есть что копировать и куда копировать
+    if (out_size > 0 && *out_buf_ptr) { 
         memcpy(*out_buf_ptr, mutator_data->grid_cur, out_size);
     } else if (out_size == 0) {
-        // out_size == 0, memcpy не нужен, *out_buf_ptr уже установлен
-    } else { // out_size > 0 но *out_buf_ptr == NULL (ошибка realloc, которая должна была быть обработана выше)
+        // out_size == 0, memcpy не нужен, *out_buf_ptr уже установлен 
+    } else { 
         return 0; 
     }
 
