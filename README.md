@@ -53,11 +53,25 @@ This project implements a custom mutator for AFL++ based on a 2D Cellular Automa
 
 ## Compilation
 
+
+
 To compile this custom mutator as a shared library (e.g., `custom_ca_mutator.so`):
 
-```bash
+
 # Using GCC
 gcc -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp
 
 # Using Clang
 clang -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp
+
+
+## Run bechmark Google FuzzBench 
+
+First,  you needed clone git repositories -> https://github.com/google/fuzzbench 
+Second, you must create folder in directory fuzzers/name-fuzzer-bench/ and copy file from my repo
+
+# Run experiment 
+PYTHONPATH=. python3 experiment/run_experiment.py --experiment-config experiment/experiment.yaml --benchmarks lcms_cms_transform_fuzzer --fuzzers  aflplusplus afl_mutator_custom --experiment-name afl-custom-mutator
+
+
+```bash
