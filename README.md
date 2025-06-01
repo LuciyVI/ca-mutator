@@ -59,12 +59,12 @@ To compile this custom mutator as a shared library (e.g., `custom_ca_mutator.so`
 
 
 # Using GCC
-gcc -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp
+gcc -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp -lm
 
 gcc -o test_mutator test_mutator_standalone.c -ldl -Wall -Wextra -O2
 
 # Using Clang
-clang -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp
+clang -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp -lm
 
 gcc -o test_mutator standalone-mutator.c -ldl -Wall -Wextra -O2
 
@@ -85,4 +85,5 @@ export AFL_CUSTOM_MUTATOR_ONLY=1 - use only custom mutators.
 
 example: 
     afl-fuzz -t 1000+ -i ~/inpunt_file  -o ~/output_data -- ./target_fuzz_binary @@ 
+
 ```bash
