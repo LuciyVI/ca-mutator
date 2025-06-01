@@ -61,9 +61,12 @@ To compile this custom mutator as a shared library (e.g., `custom_ca_mutator.so`
 # Using GCC
 gcc -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp
 
+gcc -o test_mutator test_mutator_standalone.c -ldl -Wall -Wextra -O2
+
 # Using Clang
 clang -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp
 
+gcc -o test_mutator standalone-mutator.c -ldl -Wall -Wextra -O2
 
 ## Run bechmark Google FuzzBench 
 
@@ -74,4 +77,12 @@ Second, you must create folder in directory fuzzers/name-fuzzer-bench/ and copy 
 PYTHONPATH=. python3 experiment/run_experiment.py --experiment-config experiment/experiment.yaml --benchmarks lcms_cms_transform_fuzzer --fuzzers  aflplusplus afl_mutator_custom --experiment-name afl-custom-mutator
 
 
+## Run with afl++ for REAL fuzzing 
+
+export AFL_CUSTOM_MUTATOR_LIBRARY=/path/to/mutator/afl-custom-ca-mutator_gemini.so  - use custom mutator in fuzzing with another mutators (default mutators afl++)
+
+export AFL_CUSTOM_MUTATOR_ONLY=1 - use only custom mutators. 
+
+example: 
+    afl-fuzz -t 1000+ -i ~/inpunt_file  -o ~/output_data -- ./target_fuzz_binary @@ 
 ```bash
