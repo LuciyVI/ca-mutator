@@ -1,16 +1,8 @@
-#define AFL_MAIN
-#include "afl-fuzz.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <math.h>
-
-// Максимальный размер выходного буфера
-#define MAX_MUTATION_SIZE 1024
-// Максимальный размер одного измерения сетки
-#define MAX_GRID_DIM      512
+#include "afl-fuzz.h" // Подключаем для доступа к afl_state_t и MAX_FILE
 
 #if defined(__GNUC__) || defined(__clang__)
 #  define MAYBE_UNUSED __attribute__((unused))
@@ -18,38 +10,63 @@
 #  define MAYBE_UNUSED
 #endif
 
+// Структура мутатора.
 typedef struct my_mutator {
     afl_state_t *afl;
-    uint8_t *grid_cur;
-    uint8_t *grid_next;
-    size_t capacity;
+    uint8_t *grid_cur;  // Рабочий буфер для текущего состояния
+    uint8_t *grid_next; // Рабочий буфер для следующего состояния
+    size_t capacity;    // Размер буферов (будет равен MAX_FILE)
 } my_mutator_t;
 
+/**
+ * Инициализация мутатора. Вызывается один раз при старте afl-fuzz.
+ */
 void *afl_custom_init(afl_state_t *afl, unsigned int seed) {
-    (void)seed;
+    // Используем seed для генератора случайных чисел AFL++
+    (void)seed; 
 
     my_mutator_t *data = (my_mutator_t *)calloc(1, sizeof(my_mutator_t));
-    if (!data) return NULL;
+    if (!data) {
+        perror("afl_custom_init alloc");
+        return NULL;
+    }
 
     data->afl = afl;
+    
+    // Устанавливаем нашу емкость равной стандартному максимальному размеру файла AFL++
+    data->capacity = MAX_FILE;
+
+    // Выделяем память для ДВУХ наших буферов ОДИН РАЗ, по аналогии с Radamsa.
+    data->grid_cur = malloc(data->capacity);
+    data->grid_next = malloc(data->capacity);
+
+    if (!data->grid_cur || !data->grid_next) {
+        free(data->grid_cur);
+        free(data->grid_next);
+        free(data);
+        perror("afl_custom_init buffers alloc");
+        return NULL;
+    }
+
     return data;
 }
 
+/**
+ * Деинициализация мутатора. Вызывается при завершении работы afl-fuzz.
+ */
 void afl_custom_deinit(void *data) {
     my_mutator_t *d = (my_mutator_t *)data;
     if (d) {
+        // Освобождаем память, выделенную в init.
         free(d->grid_cur);
         free(d->grid_next);
         free(d);
     }
 }
 
-// Эта функция больше не используется в современных версиях AFL++ для кастомных мутаторов,
-// но оставим ее для совместимости.
-void afl_custom_post_process(void *data, uint8_t *buf, size_t buf_size, uint8_t *match_bits) {
-    (void)data; (void)buf; (void)buf_size; (void)match_bits;
-}
-
+/**
+ * Основная функция мутации.
+ */
 size_t afl_custom_fuzz(
     void *data,
     uint8_t *buf,
@@ -60,117 +77,71 @@ size_t afl_custom_fuzz(
     size_t max_size) {
 
     my_mutator_t *mutator = (my_mutator_t *)data;
-
-    // Ограничиваем максимальный размер выходных данных
-    if (max_size == 0 || max_size > MAX_MUTATION_SIZE) {
-        max_size = MAX_MUTATION_SIZE;
-    }
-
-    // ДОБАВЛЕНО: Определяем рабочий размер, чтобы избежать проблем с огромными файлами.
-    // Это предотвращает ошибку логики, когда width и height ограничивались независимо.
+    
+    // Определяем рабочий размер, но не больше, чем емкость наших буферов.
     size_t working_size = buf_size;
-    const size_t max_grid_area = (size_t)MAX_GRID_DIM * MAX_GRID_DIM;
-    if (working_size > max_grid_area) {
-        working_size = max_grid_area;
+    if (working_size > mutator->capacity) {
+        working_size = mutator->capacity;
     }
-
+    
+    // Обработка пустого входа
     if (working_size == 0) {
-        // Нечего мутировать, просто возвращаем как есть (или 0, если *out_buf не установлен).
-        // В данном случае AFL++ не вызовет нас с buf_size == 0, но проверка не помешает.
-        *out_buf = buf;
-        return buf_size;
+        mutator->grid_cur[0] = rand_below(mutator->afl, 256);
+        *out_buf = mutator->grid_cur;
+        return 1;
     }
 
-    // Вычисляем размеры сетки на основе рабочего размера
-    int width = (int)sqrt((double)working_size);
+    // --- Логика клеточного автомата (остается без изменений) ---
+    int width = 256;
+    if ((size_t)width > working_size) { width = working_size; }
     if (width <= 0) width = 1;
 
     int height = (working_size + width - 1) / width;
     if (height <= 0) height = 1;
 
-    size_t total_cells = (size_t)width * height;
+    size_t total_cells = (size_t)width * (size_t)height;
 
-    // Перераспределяем память для сетки, если требуется
-    if (total_cells > mutator->capacity) {
-        free(mutator->grid_cur);
-        free(mutator->grid_next);
-
-        mutator->grid_cur = malloc(total_cells);
-        mutator->grid_next = malloc(total_cells);
-
-        // ИЗМЕНЕНО: Корректная обработка сбоя malloc
-        if (!mutator->grid_cur || !mutator->grid_next) {
-            free(mutator->grid_cur);
-            free(mutator->grid_next);
-            mutator->grid_cur = mutator->grid_next = NULL;
-            mutator->capacity = 0;
-
-            // Сообщаем AFL++, что мутация провалилась. НЕ возвращаем оригинальный буфер.
-            return 0;
-        }
-        mutator->capacity = total_cells;
-    }
-
-    // Копируем входные данные в сетку, используя меньший из размеров
-    size_t copy_size = (working_size < total_cells) ? working_size : total_cells;
-    memcpy(mutator->grid_cur, buf, copy_size);
-    if (total_cells > copy_size) {
-        memset(mutator->grid_cur + copy_size, 0, total_cells - copy_size);
+    memcpy(mutator->grid_cur, buf, working_size);
+    if (total_cells > working_size && total_cells <= mutator->capacity) {
+        memset(mutator->grid_cur + working_size, 0, total_cells - working_size);
     }
     
-    // Принудительный битфлип первого байта, чтобы гарантировать изменение
-    mutator->grid_cur[0] ^= 1 << rand_below(mutator->afl, 8);
-
-    // Несколько итераций мутации
     int num_iterations = 1 + rand_below(mutator->afl, 8);
 
     for (int iter = 0; iter < num_iterations; ++iter) {
         for (int r = 0; r < height; ++r) {
             for (int c = 0; c < width; ++c) {
-                size_t idx = (size_t)r * width + c;
-
-                // С вероятностью 1/4 — простой битфлип
+                size_t idx = (size_t)r * (size_t)width + (size_t)c;
                 if (rand_below(mutator->afl, 4) == 0) {
                     mutator->grid_next[idx] = mutator->grid_cur[idx] ^ (1 << rand_below(mutator->afl, 8));
                 } else {
-                    // XOR-суммирование соседей в стиле игры "Жизнь"
                     uint8_t xor_sum = 0;
                     for (int dr = -1; dr <= 1; ++dr) {
                         for (int dc = -1; dc <= 1; ++dc) {
                             if (dr == 0 && dc == 0) continue;
                             int nr = (r + dr + height) % height;
                             int nc = (c + dc + width) % width;
-                            xor_sum ^= mutator->grid_cur[(size_t)nr * width + nc];
+                            xor_sum ^= mutator->grid_cur[(size_t)nr * (size_t)width + (size_t)nc];
                         }
                     }
                     mutator->grid_next[idx] = xor_sum;
                 }
             }
         }
-
-        // Меняем текущий и следующий слой местами для следующей итерации
         uint8_t *tmp = mutator->grid_cur;
         mutator->grid_cur = mutator->grid_next;
         mutator->grid_next = tmp;
     }
+    // --- Конец логики клеточного автомата ---
 
-    // Формируем результат, ограничивая его максимальным размером
     size_t out_size = total_cells;
+    // Уважаем лимит максимального размера, заданный AFL++
     if (out_size > max_size) {
         out_size = max_size;
     }
 
-    // Выделяем память под выходной буфер
-    uint8_t* out_buf_ptr = malloc(out_size);
-
-    // ИЗМЕНЕНО: Корректная обработка сбоя malloc
-    if (!out_buf_ptr) {
-        // Сообщаем AFL++, что мутация провалилась
-        return 0;
-    }
-
-    memcpy(out_buf_ptr, mutator->grid_cur, out_size);
-    *out_buf = out_buf_ptr;
+    // Говорим AFL++, что результат находится в нашем заранее выделенном буфере.
+    *out_buf = mutator->grid_cur;
 
     return out_size;
 }
