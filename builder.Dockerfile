@@ -55,4 +55,8 @@ RUN cd /afl && unset CFLAGS CXXFLAGS && export CC=clang AFL_NO_X86=1 && \
     PYTHON_INCLUDE=/ make && \
     cp utils/aflpp_driver/libAFLDriver.a /
 
-RUN clang -I/afl/include -shared -fPIC -O3 /out/custom_mutators/afl-new-ca-gemini-mutator.c  -o /out/custom_mutators/afl-custom-ca-mutator.so 
+RUN gcc -O3 -g -fPIC -Wno-unused-result -Wl,--allow-multiple-definition \
+    -o /out/custom_mutators/afl-custom-ca-mutator.so  /out/custom_mutators/afl-new-ca-gemini-mutator.c  \
+    -I/afl/include  \
+    -Wall -Wextra -fopenmp -shared -lm \
+    /home/fbogoslavskii/Downloads/AFLplusplus/src/afl-performance.o

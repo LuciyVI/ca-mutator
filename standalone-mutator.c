@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <dlfcn.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -55,6 +56,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Ошибка чтения\n");
         fclose(f); dlclose(handle); free(orig_input_data); return 1;
     }
+
     fclose(f);
 
     // Создаем dummy afl_state для передачи в post_process

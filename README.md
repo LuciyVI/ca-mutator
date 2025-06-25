@@ -1,3 +1,18 @@
+This mutator solves the problem of generating diverse and potentially interesting fuzzing test cases using AFL++. Its purpose is to modify existing input data (LEDs) in such a way that it is highly likely to cause unexpected behavior or errors in the target program.
+
+Here's how to add a section to your README.md (the README is supposed to be in Russian):
+
+Purpose and task to be solved
+This mutator is intended for use with the AFL++ fuzzer. Its main task is to efficiently generate new, diverse test cases based on initial input data (the so—called "seed"). The purpose of such generation is to detect errors (bugs), vulnerabilities, or other unintended behaviors in the target program being fuzzed.
+
+To solve this problem, this mutator uses an approach based on a two-dimensional cellular automaton:
+
+The input data (byte stream) is interpreted as the initial state of a flat grid (a two-dimensional array of cells).
+A simple cellular automaton rule applies to this grid: the new state of each cell is calculated as the result of an XOR operation on the states of its eight neighbors (Moore's neighborhood).
+This operation is repeated a random small number of times (from 1 to 8 iterations).
+The resulting grid is converted back into a byte stream and used as a new test case.
+This mutation method tends to create structurally modified, but still related, input data. Transformations based on cellular automata can generate complex and nonlinear patterns of change that are not always easily achieved by more traditional, simple mutations (such as flipping bits, arithmetic operations on bytes, or swapping blocks). It is assumed that such "unusual" mutations can help to explore other execution paths in the target program and potentially identify specific types of errors that could be missed by other mutation strategies.
+
 # AFL++ Custom Mutator: Cellular Automaton (XOR Neighbors)
 
 This project implements a custom mutator for AFL++ based on a 2D Cellular Automaton (CA). The mutator transforms input data into a 2D grid and applies a simple CA rule for a random number of iterations to generate mutated test cases.
@@ -59,6 +74,7 @@ To compile this custom mutator as a shared library (e.g., `custom_ca_mutator.so`
 
 
 # Using GCC
+gcc -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp -lm
 gcc  -O3 -Wall -Wextra -fPIC -fopenmp -g -Wno-unused-result \
     -o custom_ca_mutator.so afl-new-ca-ng.c \
     -I/path/to/AFLplusplus/include/ \
@@ -68,7 +84,7 @@ gcc  -O3 -Wall -Wextra -fPIC -fopenmp -g -Wno-unused-result \
 gcc -o test_mutator test_mutator_standalone.c -ldl -Wall -Wextra -O2
 
 # Using Clang
-clang -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp
+clang -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp -lm
 
 gcc -o test_mutator standalone-mutator.c -ldl -Wall -Wextra -O2
 
@@ -91,3 +107,5 @@ example:
     afl-fuzz -t 1000+ -i ~/inpunt_file  -o ~/output_data -- ./target_fuzz_binary @@ 
 github repo - https://github.com/LuciyVI/ca-mutator
 ```bash 
+
+```bash
