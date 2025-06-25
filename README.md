@@ -89,4 +89,5 @@ export AFL_CUSTOM_MUTATOR_ONLY=1 - use only custom mutators.
 
 example: 
     afl-fuzz -t 1000+ -i ~/inpunt_file  -o ~/output_data -- ./target_fuzz_binary @@ 
-```bash
+github repo - https://github.com/LuciyVI/ca-mutator
+```bash 
