@@ -74,7 +74,6 @@ To compile this custom mutator as a shared library (e.g., `custom_ca_mutator.so`
 
 
 # Using GCC
-gcc -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp -lm
 gcc  -O3 -Wall -Wextra -fPIC -fopenmp -g -Wno-unused-result \
     -o custom_ca_mutator.so afl-new-ca-ng.c \
     -I/path/to/AFLplusplus/include/ \
