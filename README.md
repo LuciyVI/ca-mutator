@@ -1,7 +1,5 @@
 This mutator solves the problem of generating diverse and potentially interesting fuzzing test cases using AFL++. Its purpose is to modify existing input data (LEDs) in such a way that it is highly likely to cause unexpected behavior or errors in the target program.
 
-Here's how to add a section to your README.md (the README is supposed to be in Russian):
-
 Purpose and task to be solved
 This mutator is intended for use with the AFL++ fuzzer. Its main task is to efficiently generate new, diverse test cases based on initial input data (the so—called "seed"). The purpose of such generation is to detect errors (bugs), vulnerabilities, or other unintended behaviors in the target program being fuzzed.
 
