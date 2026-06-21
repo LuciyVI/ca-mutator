@@ -1,7 +1,7 @@
 FROM gcr.io/fuzzbench/base-image
-# This makes interactive docker runs painless:
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
-ENV AFL_CUSTOM_MUTATOR_LIBRARY=/out/custom_mutators/afl-custom-ca-mutator.so
+ENV CA_MUTATOR_VARIANT=xor
+ENV AFL_CUSTOM_MUTATOR_LIBRARY=/out/custom_mutators/ca_mutator_xor.so
 
 #ENV AFL_MAP_SIZE=2621440
 ENV PATH="$PATH:/out"

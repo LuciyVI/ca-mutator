@@ -1,108 +1,57 @@
-This mutator solves the problem of generating diverse and potentially interesting fuzzing test cases using AFL++. Its purpose is to modify existing input data (LEDs) in such a way that it is highly likely to cause unexpected behavior or errors in the target program.
+# ca-mutator
 
-Purpose and task to be solved
-This mutator is intended for use with the AFL++ fuzzer. Its main task is to efficiently generate new, diverse test cases based on initial input data (the so—called "seed"). The purpose of such generation is to detect errors (bugs), vulnerabilities, or other unintended behaviors in the target program being fuzzed.
+AFL++ custom mutator with pluggable engines:
 
-To solve this problem, this mutator uses an approach based on a two-dimensional cellular automaton:
+- `ca_mutator_xor.so` — legacy `CA_OUTPUT_BUFFER` engine.
+- `ca_mutator_growing.so` — `CA_OUTPUT_PLAN` engine with mutation-plan normalization and application in adapter.
 
-The input data (byte stream) is interpreted as the initial state of a flat grid (a two-dimensional array of cells).
-A simple cellular automaton rule applies to this grid: the new state of each cell is calculated as the result of an XOR operation on the states of its eight neighbors (Moore's neighborhood).
-This operation is repeated a random small number of times (from 1 to 8 iterations).
-The resulting grid is converted back into a byte stream and used as a new test case.
-This mutation method tends to create structurally modified, but still related, input data. Transformations based on cellular automata can generate complex and nonlinear patterns of change that are not always easily achieved by more traditional, simple mutations (such as flipping bits, arithmetic operations on bytes, or swapping blocks). It is assumed that such "unusual" mutations can help to explore other execution paths in the target program and potentially identify specific types of errors that could be missed by other mutation strategies.
+The two shared libraries are built from the same common runtime and are isolated by build target.
 
-# AFL++ Custom Mutator: Cellular Automaton (XOR Neighbors)
+## Current v1 design
 
-This project implements a custom mutator for AFL++ based on a 2D Cellular Automaton (CA). The mutator transforms input data into a 2D grid and applies a simple CA rule for a random number of iterations to generate mutated test cases.
+- `src/ca_engine.c` exposes engine creation + `mutate`/`destroy`.
+- `include/ca_engine.h` defines stable engine/result interfaces and RNG contract:
+  - `ca_engine_create_*` receives an explicit `ca_rng_t`.
+  - `ca_rng_t.below(ctx, upper)` must be called with `upper > 0`.
+  - `CA_OUTPUT_BUFFER` and `CA_OUTPUT_PLAN` are distinct.
+- `src/mutation_plan.c` implements validate/normalize/measure/apply pipeline for plan-based mutations.
+- `src/afl_adapter.c` is the minimal required AFL++ interface:
+  - `afl_custom_init`
+  - `afl_custom_fuzz`
+  - `afl_custom_describe`
+  - `afl_custom_splice_optout`
+  - `afl_custom_deinit`
+- `src/afl_adapter.c` owns `plan_out_buf` for applying plans and uses `afl_realloc` when growing it.
 
-## Features
+### Ownership contract
 
-* **Cellular Automaton Mutation:** Uses a 2D CA to mutate input.
-* **Dynamic Grid:** The input buffer is mapped to a 2D grid. Grid dimensions are calculated based on input size, aiming for a square-like structure.
-* **XOR Sum Rule:** The state of each cell in the next generation is determined by the XOR sum of its 8 neighbors in the current generation.
-* **Toroidal Grid:** The grid boundaries wrap around (toroidal array).
-* **Random Iterations:** The CA evolves for a random number of iterations (1 to 8 by default), determined using AFL++'s random number generator.
-* **Memory Management:** Grids are dynamically allocated and resized as needed, with a maximum dimension limit (`MAX_GRID_DIM`) to prevent excessive memory usage.
-* **OpenMP Support:** The CA update loop can be parallelized using OpenMP if enabled during compilation.
-* **AFL++ Integration:** Implements the required `afl_custom_init`, `afl_custom_deinit`, and `afl_custom_fuzz` functions for use with AFL++.
-* **Fallback for `RAND_CACHE_SIZE`:** Provides a default value and a warning if `RAND_CACHE_SIZE` is not defined by AFL++ headers (e.g., if `config.h` is missing or doesn't define it).
+- `CA_OUTPUT_BUFFER`:
+  - returned buffer is a borrowed view from XOR engine.
+  - lives until next `ca_engine_mutate` or engine destroy.
+  - AFL adapter/standalone **must not free** it.
+- `CA_OUTPUT_PLAN`:
+  - normalized plan is owned by growing engine / mutation_plan arena.
+  - adapter materializes output into its own `plan_out_buf` and returns that pointer.
 
-## How it Works
+### Zero-result / skip contract
 
-1.  **Initialization (`afl_custom_init`):**
-    * Allocates a state structure (`my_mutator_t`) to hold the AFL++ state and CA grids.
+- `ca_custom_fuzz` treats `return len == 0` as skip.
+- XOR baseline still preserves legacy behavior for empty input (`1` byte when needed).
+- Growing engine allows only `INSERT_BYTES(pos=0)` on empty input; with `max_output_len == 0` it returns `SKIP`.
+- A plan that deletes the entire non-empty input is treated as skip in adapter (zero length output).
 
-2.  **Deinitialization (`afl_custom_deinit`):**
-    * Frees the allocated memory for the state structure and CA grids.
-
-3.  **Fuzzing (`afl_custom_fuzz`):**
-    * **Input Handling:**
-        * If the input buffer (`buf`) is empty, it returns 0.
-        * Calculates `width` and `height` for the 2D grid. `width` is roughly `sqrt(buf_size)`. `height` is calculated to accommodate all input bytes.
-        * Dimensions are capped by `MAX_GRID_DIM` (default 256).
-    * **Grid Allocation:**
-        * If the required `total_cells` exceeds the current `grid_capacity`, the internal `grid_cur` and `grid_next` buffers are reallocated.
-    * **Grid Population:**
-        * The input buffer data is copied into `grid_cur`.
-        * If `total_cells` is larger than `buf_size`, the remaining cells in `grid_cur` are padded with zeros.
-    * **CA Iterations:**
-        * A random number of iterations (`num_iterations_T`, between 1 and 8) is determined using `afl->rand_seed`.
-        * The CA simulation runs for `num_iterations_T` steps:
-            * For each cell `(r, c)` in `grid_cur`:
-                * The states of its 8 neighbors are XORed together.
-                * The result is stored in `grid_next[r * width + c]`.
-                * Boundary conditions are toroidal (wrap-around).
-            * After updating all cells, `grid_cur` and `grid_next` pointers are swapped.
-    * **Output Generation:**
-        * The content of the final `grid_cur` is copied to the output buffer (`*out_buf_ptr`).
-        * The output size is `total_cells`, potentially truncated by `max_size` if provided by AFL++.
-        * The output buffer is reallocated to the required `out_size`.
-
-## Dependencies
-
-* **AFL++:** This mutator is designed to be compiled as a shared library and used with AFL++.
-* **C Compiler:** A C compiler that supports C99 and GNU/Clang extensions (like `__attribute__((unused))`, `__has_include`). GCC or Clang are recommended.
-* **OpenMP (Optional):** If you want to use parallel processing for the CA updates, your compiler needs to support OpenMP, and you should compile with the appropriate flag (e.g., `-fopenmp`).
-
-## Compilation
-
-
-
-To compile this custom mutator as a shared library (e.g., `custom_ca_mutator.so`):
-
-
-# Using GCC
-gcc  -O3 -Wall -Wextra -fPIC -fopenmp -g -Wno-unused-result \
-    -o custom_ca_mutator.so afl-new-ca-ng.c \
-    -I/path/to/AFLplusplus/include/ \
-    -Wall -Wextra -fopenmp -shared -lm \
-    /path/to/AFLplusplus/src/afl-performance.o
-
-gcc -o test_mutator test_mutator_standalone.c -ldl -Wall -Wextra -O2
-
-# Using Clang
-clang -shared -o custom_ca_mutator.so your_source_file.c -I/path/to/afl++/include $(afl-config --cflags) -O3 -Wall -Wextra -fPIC -fopenmp -lm
-
-gcc -o test_mutator standalone-mutator.c -ldl -Wall -Wextra -O2
-
-## Run bechmark Google FuzzBench 
-
-First,  you needed clone git repositories -> https://github.com/google/fuzzbench 
-Second, you must create folder in directory fuzzers/name-fuzzer-bench/ and copy file from my repo
-
-# Run experiment 
-PYTHONPATH=. python3 experiment/run_experiment.py --experiment-config experiment/experiment.yaml --benchmarks lcms_cms_transform_fuzzer --fuzzers  aflplusplus afl_mutator_custom --experiment-name afl-custom-mutator
-
-
-## Run with afl++ for REAL fuzzing 
-
-export AFL_CUSTOM_MUTATOR_LIBRARY=/path/to/mutator/afl-custom-ca-mutator_gemini.so  - use custom mutator in fuzzing with another mutators (default mutators afl++)
-
-export AFL_CUSTOM_MUTATOR_ONLY=1 - use only custom mutators. 
-
-example: 
-    afl-fuzz -t 1000+ -i ~/inpunt_file  -o ~/output_data -- ./target_fuzz_binary @@ 
-github repo - https://github.com/LuciyVI/ca-mutator
-```bash 
+### Build
 
 ```bash
+make ca_mutator_xor.so
+make ca_mutator_growing.so
+make standalone-mutator
+```
+
+Build uses pinned AFL++ headers via `AFL_INCLUDE` and does not rely on repository `afl-fuzz.h`.
+
+## Notes
+
+- `standalone-mutator` is intentionally minimal and loads any built shared object.
+- Build script: `scripts/build_mutator.sh`
+- Docker setup pins AFL++ commit in `builder.Dockerfile` and verifies it after checkout.

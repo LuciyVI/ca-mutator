@@ -15,6 +15,7 @@
 ARG parent_image
 FROM $parent_image
 
+ARG AFLPP_COMMIT=56d5aa3101945e81519a3fac8783d0d8fad82779
 
 RUN apt-get update && \
     apt-get install -y \
@@ -38,13 +39,13 @@ RUN apt-get update && \
 
 # Подготовка кастомного мутатора
 RUN mkdir -p /out/custom_mutators
-COPY afl-new-ca-gemini-mutator.c  /out/custom_mutators/
+COPY . /workspace
 
 # Download afl++.
 RUN git clone  https://github.com/AFLplusplus/AFLplusplus /afl && \
-    cd /afl && ls -la \
-    git checkout 56d5aa3101945e81519a3fac8783d0d8fad82779 || \
-    true
+    cd /afl && \
+    git checkout "${AFLPP_COMMIT}" && \
+    test "$(git rev-parse HEAD)" = "${AFLPP_COMMIT}"
 
 
 
@@ -55,8 +56,6 @@ RUN cd /afl && unset CFLAGS CXXFLAGS && export CC=clang AFL_NO_X86=1 && \
     PYTHON_INCLUDE=/ make && \
     cp utils/aflpp_driver/libAFLDriver.a /
 
-RUN gcc -O3 -g -fPIC -Wno-unused-result -Wl,--allow-multiple-definition \
-    -o /out/custom_mutators/afl-custom-ca-mutator.so  /out/custom_mutators/afl-new-ca-gemini-mutator.c  \
-    -I/afl/include  \
-    -Wall -Wextra -fopenmp -shared -lm \
-    /home/fbogoslavskii/Downloads/AFLplusplus/src/afl-performance.o
+RUN cd /workspace && \
+    make AFL_INCLUDE=/afl/include && \
+    cp ca_mutator_xor.so ca_mutator_growing.so /out/custom_mutators/

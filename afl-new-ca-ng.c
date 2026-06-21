@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "afl-fuzz.h" // Подключаем для доступа к afl_state_t и MAX_FILE
+#include <afl-fuzz.h> // Для доступа к afl_state_t и MAX_FILE
 
 #if defined(__GNUC__) || defined(__clang__)
 #  define MAYBE_UNUSED __attribute__((unused))
